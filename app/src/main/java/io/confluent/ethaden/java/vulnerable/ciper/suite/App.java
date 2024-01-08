@@ -60,6 +60,10 @@ public class App {
         //System.setProperty("jdk.tls.ephemeralDHKeySize", "512");
         // Example 2: Try to use potentially weak Diffie-Hellman modulo size of 1024 (which might be broken by state-level attackers)
         System.setProperty("jdk.tls.ephemeralDHKeySize", "1024");
+        // Will make downgrading to less than 1024 bits impossible (but it's not done even without this setting)
+        //System.setProperty("jdk.tls.disabledAlgorithms", "SSLv3, RC4, MD5withRSA, DH keySize < 1024");
+        // Doesn't do anything:
+        System.setProperty("jdk.tls.disabledAlgorithms", "SSLv3, RC4, MD5withRSA, DH keySize > 1024");
         // Example 3: Set Diffie-Hellman key size to secure 2048 bit
         //System.setProperty("jdk.tls.ephemeralDHKeySize", "2048");
         // Example 4: Even more secure
