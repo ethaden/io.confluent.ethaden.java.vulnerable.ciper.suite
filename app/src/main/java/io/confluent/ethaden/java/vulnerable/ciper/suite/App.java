@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Properties;
 import org.apache.hc.client5.http.auth.AuthCache;
 import org.apache.hc.client5.http.auth.AuthScope;
+import org.apache.hc.client5.http.auth.Credentials;
 import org.apache.hc.client5.http.auth.CredentialsProvider;
 import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
 import org.apache.hc.client5.http.classic.HttpClient;
@@ -28,8 +29,12 @@ import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.Header;
+import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.HttpHost;
+import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.HttpClientResponseHandler;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.http.protocol.BasicHttpContext;
 
 public class App {
     private String api_key;
@@ -42,53 +47,39 @@ public class App {
         this.api_secret = (String)properties.getProperty("API_SECRET");
         this.hostname = (String)properties.getProperty("HOSTNAME");
         this.cluster_id = (String)properties.getProperty("CLUSTER_ID");
-        System.out.println(api_key+" : "+api_secret);
-        System.out.println(hostname);
-        System.out.println(cluster_id);
-    }
-    public String getGreeting() {
-        return "Hello World!";
     }
 
-    public void printTopics() throws IOException, URISyntaxException {
+    public void printTopics() throws IOException, URISyntaxException, ParseException {
         URI uri = new URI("https://"+hostname+"/kafka/v3/clusters/" +cluster_id+ "/topics");
-        //System.out.println(uri);
         final HttpHost targetHost = new HttpHost("https", hostname, 443);
         final BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
-        //AuthScope authScope = new AuthScope(targetHost);
-        AuthScope authScope = new AuthScope(uri.getHost(), uri.getPort());
-        credsProvider.setCredentials(authScope, new UsernamePasswordCredentials(api_key, api_secret.toCharArray()));
+        AuthScope authScope = new AuthScope(uri.getHost(), -1);
+        UsernamePasswordCredentials credentials = new UsernamePasswordCredentials(api_key, api_secret.toCharArray());
+        credsProvider.setCredentials(authScope, credentials);
 
-        // Create AuthCache instance
-        final AuthCache authCache = new BasicAuthCache();
-        // Generate BASIC scheme object and add it to the local auth cache
-        authCache.put(targetHost, new BasicScheme());
+        final BasicScheme basicAuth = new BasicScheme();
+        basicAuth.initPreemptive(credentials);
 
-        // Add AuthCache to the execution context
         final HttpClientContext context = HttpClientContext.create();
         context.setCredentialsProvider(credsProvider);
-        context.setAuthCache(authCache);
+        context.resetAuthExchange(targetHost, basicAuth);
 
-        try (CloseableHttpClient client = HttpClients.custom()
-                .setDefaultCredentialsProvider(credsProvider)
-                .build()) {
-            final HttpGet request = new HttpGet("https://"+hostname+"/kafka/v3/clusters/" +cluster_id+ "/topics");
-            System.out.println(request);
-            ClassicHttpResponse result = (ClassicHttpResponse) client.execute(targetHost, request, context, response -> {
-                return response;
-                });
-/*             ClassicHttpResponse result = (ClassicHttpResponse) client.execute(targetHost, request, context, response -> {
-                return response;
-                });*/
-                System.out.println(result);
-                Header[] headers = result.getHeaders();
-                for (Header header: headers) {
-                    System.out.println(header);
+        HttpGet request = new HttpGet("https://"+hostname+"/kafka/v3/clusters/" +cluster_id+ "/topics");
+        try (CloseableHttpClient client = HttpClientBuilder.create().build()) {
+            client.execute(targetHost, request, context, response -> {
+                System.out.println(response);
+                HttpEntity entity = response.getEntity();
+                if (entity != null) {
+                    // return it as a String
+                    String result = EntityUtils.toString(entity);
+                    System.out.println(result);
                 }
+                return response;
+            });
         }
     }
 
-    public static void main(String[] args) throws IOException, URISyntaxException {
+    public static void main(String[] args) throws IOException, URISyntaxException, ParseException {
         if (args.length!=1) {
             System.out.println("Usage: java xy.jar <properties.file!>");
             System.exit(1);;
