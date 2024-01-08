@@ -51,12 +51,19 @@ public class App {
     }
 
     private BasicHttpClientConnectionManager getConnectionManager() throws KeyManagementException, NoSuchAlgorithmException, KeyStoreException {
+        System.setProperty("javax.net.debug","ssl:handshake");
+        //System.setProperty("javax.net.debug","all");
+        // Allow setting the modulo size
+        //System.setProperty("jsse.enableFFDHE", "true");
+        System.setProperty("jsse.enableFFDHE", "false");
         // Example 1: Try to use very weak export grade Diffie-Hellman modulo (will cause an exception for recent versions of the JDK)
-        //System.setProperty("jdk.tls.ephemeralDHKeySize", "512"); 
+        //System.setProperty("jdk.tls.ephemeralDHKeySize", "512");
         // Example 2: Try to use potentially weak Diffie-Hellman modulo size of 1024 (which might be broken by state-level attackers)
-        //System.setProperty("jdk.tls.ephemeralDHKeySize", "1024");
+        System.setProperty("jdk.tls.ephemeralDHKeySize", "1024");
         // Example 3: Set Diffie-Hellman key size to secure 2048 bit
-        System.setProperty("jdk.tls.ephemeralDHKeySize", "2048");
+        //System.setProperty("jdk.tls.ephemeralDHKeySize", "2048");
+        // Example 4: Even more secure
+        //System.setProperty("jdk.tls.ephemeralDHKeySize", "4096");
         // Secure
         final SSLContext sslContext = SSLContext.getDefault();
         // Example 1,2,3: Use cipher suites with Diffie-Hellman key exchange which is considered weak if used with 1024 bit DHE key
