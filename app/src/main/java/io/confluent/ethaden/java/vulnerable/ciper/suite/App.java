@@ -7,34 +7,35 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.http.HttpResponse;
-import java.util.ArrayList;
-import java.util.List;
+import java.security.KeyManagementException;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
 import java.util.Properties;
-import org.apache.hc.client5.http.auth.AuthCache;
+import javax.net.ssl.SSLContext;
 import org.apache.hc.client5.http.auth.AuthScope;
-import org.apache.hc.client5.http.auth.Credentials;
-import org.apache.hc.client5.http.auth.CredentialsProvider;
 import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
-import org.apache.hc.client5.http.classic.HttpClient;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
-import org.apache.hc.client5.http.impl.auth.BasicAuthCache;
 import org.apache.hc.client5.http.impl.auth.BasicCredentialsProvider;
 import org.apache.hc.client5.http.impl.auth.BasicScheme;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.BasicHttpClientConnectionManager;
 import org.apache.hc.client5.http.protocol.HttpClientContext;
-import org.apache.hc.core5.http.ClassicHttpRequest;
-import org.apache.hc.core5.http.ClassicHttpResponse;
-import org.apache.hc.core5.http.Header;
+import org.apache.hc.client5.http.socket.ConnectionSocketFactory;
+import org.apache.hc.client5.http.socket.PlainConnectionSocketFactory;
+import org.apache.hc.client5.http.ssl.DefaultHostnameVerifier;
+import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
+import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
 import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.ParseException;
-import org.apache.hc.core5.http.io.HttpClientResponseHandler;
+import org.apache.hc.core5.http.config.Registry;
+import org.apache.hc.core5.http.config.RegistryBuilder;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.core5.http.protocol.BasicHttpContext;
+import org.apache.hc.core5.ssl.SSLContexts;
+import org.apache.hc.core5.ssl.TrustStrategy;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
 
 public class App {
     private String api_key;
@@ -43,18 +44,69 @@ public class App {
     private String cluster_id;
 
     public App(Properties properties) {
-        this.api_key = (String)properties.getProperty("API_KEY");
-        this.api_secret = (String)properties.getProperty("API_SECRET");
-        this.hostname = (String)properties.getProperty("HOSTNAME");
-        this.cluster_id = (String)properties.getProperty("CLUSTER_ID");
+        this.api_key = (String) properties.getProperty("API_KEY");
+        this.api_secret = (String) properties.getProperty("API_SECRET");
+        this.hostname = (String) properties.getProperty("HOSTNAME");
+        this.cluster_id = (String) properties.getProperty("CLUSTER_ID");
     }
 
-    public void printTopics() throws IOException, URISyntaxException, ParseException {
-        URI uri = new URI("https://"+hostname+"/kafka/v3/clusters/" +cluster_id+ "/topics");
+    private BasicHttpClientConnectionManager getConnectionManager() throws KeyManagementException, NoSuchAlgorithmException, KeyStoreException {
+        // Example 1: Try to use very weak export grade Diffie-Hellman modulo (will cause an exception for recent versions of the JDK)
+        //System.setProperty("jdk.tls.ephemeralDHKeySize", "512"); 
+        // Example 2: Try to use potentially weak Diffie-Hellman modulo size of 1024 (which might be broken by state-level attackers)
+        //System.setProperty("jdk.tls.ephemeralDHKeySize", "1024");
+        // Example 3: Set Diffie-Hellman key size to secure 2048 bit
+        System.setProperty("jdk.tls.ephemeralDHKeySize", "2048");
+        // Secure
+        final SSLContext sslContext = SSLContext.getDefault();
+        // Example 1,2,3: Use cipher suites with Diffie-Hellman key exchange which is considered weak if used with 1024 bit DHE key
+        final SSLConnectionSocketFactory sslsf =
+                new SSLConnectionSocketFactory(sslContext,
+            new String[]{"TLSv1.2"},
+            new String[] {
+                // The following ciphers are accepted. They are secure as long as the DHE modulo is large enough
+                "TLS_DHE_RSA_WITH_AES_256_GCM_SHA384",
+                "TLS_DHE_RSA_WITH_AES_128_GCM_SHA256",
+                "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256",
+                "TLS_DHE_RSA_WITH_AES_128_CBC_SHA256",
+                "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256",
+                "TLS_DHE_RSA_WITH_AES_128_CBC_SHA256",
+/*              // The following ciphers are rejected. DSS is considered insecure
+                "TLS_DHE_DSS_WITH_AES_256_GCM_SHA384",
+                "TLS_DHE_DSS_WITH_AES_128_GCM_SHA256",
+                "TLS_DHE_DSS_WITH_AES_256_CBC_SHA256",
+                "TLS_DHE_DSS_WITH_AES_128_CBC_SHA256",
+                "TLS_DHE_DSS_WITH_AES_256_CBC_SHA256",
+                "TLS_DHE_DSS_WITH_AES_128_CBC_SHA256",
+                // The following ciphers are rejected. SHA is known to be insecure
+                "TLS_DHE_RSA_WITH_AES_256_CBC_SHA",
+                "TLS_DHE_DSS_WITH_AES_256_CBC_SHA",
+                "TLS_DHE_RSA_WITH_AES_128_CBC_SHA",
+                "TLS_DHE_DSS_WITH_AES_128_CBC_SHA",
+ */            },
+            new DefaultHostnameVerifier());
+        // Alternative: Use default cipher suites provided by Java. Client and server will negotiate optimal ciphers.
+        // Downgrade attacks might be possible though as long as TLS 1.2 or below is used
+/*         final SSLConnectionSocketFactory sslsf =
+            new SSLConnectionSocketFactory(sslContext, 
+            new String[]{"TLSv1.2"},
+            sslContext.getSocketFactory().getSupportedCipherSuites(),
+            new DefaultHostnameVerifier());
+ */
+        final Registry<ConnectionSocketFactory> socketFactoryRegistry =
+                RegistryBuilder.<ConnectionSocketFactory>create().register("https", sslsf)
+                        .register("http", new PlainConnectionSocketFactory()).build();
+
+        return new BasicHttpClientConnectionManager(socketFactoryRegistry);
+    }
+
+    public void printTopics() throws IOException, URISyntaxException, ParseException, KeyManagementException, NoSuchAlgorithmException, KeyStoreException {
+        URI uri = new URI("https://" + hostname + "/kafka/v3/clusters/" + cluster_id + "/topics");
         final HttpHost targetHost = new HttpHost("https", hostname, 443);
         final BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
         AuthScope authScope = new AuthScope(uri.getHost(), -1);
-        UsernamePasswordCredentials credentials = new UsernamePasswordCredentials(api_key, api_secret.toCharArray());
+        UsernamePasswordCredentials credentials =
+                new UsernamePasswordCredentials(api_key, api_secret.toCharArray());
         credsProvider.setCredentials(authScope, credentials);
 
         final BasicScheme basicAuth = new BasicScheme();
@@ -64,23 +116,51 @@ public class App {
         context.setCredentialsProvider(credsProvider);
         context.resetAuthExchange(targetHost, basicAuth);
 
-        HttpGet request = new HttpGet("https://"+hostname+"/kafka/v3/clusters/" +cluster_id+ "/topics");
-        try (CloseableHttpClient client = HttpClientBuilder.create().build()) {
+        JSONParser parser = new JSONParser();
+
+
+        HttpGet request =
+                new HttpGet("https://" + hostname + "/kafka/v3/clusters/" + cluster_id + "/topics");
+        try (CloseableHttpClient client =
+                HttpClientBuilder.create().setConnectionManager(getConnectionManager()).build()) {
             client.execute(targetHost, request, context, response -> {
                 System.out.println(response);
                 HttpEntity entity = response.getEntity();
-                if (entity != null) {
+                if (response.getCode() == 200 && entity != null) {
                     // return it as a String
                     String result = EntityUtils.toString(entity);
-                    System.out.println(result);
+                    try {
+                        JSONObject jsonObj = (JSONObject) parser.parse(result);
+                        System.out.println(jsonObj);
+                        JSONObject metadata = (JSONObject) jsonObj.get("metadata");
+                        if (metadata != null) {
+                            System.out.println(metadata);
+                            String nextURIStr = (String) metadata.get("next");
+                            if (nextURIStr != null) {
+                                URI nextURI = new URI(nextURIStr);
+                                if (!nextURI.getScheme().equals("https")) {
+                                    System.err.println(
+                                            "Error: Provided \"next\" pointer uses http instead of https! Exiting...");
+                                    return response;
+                                }
+                            }
+                        }
+
+                    } catch (org.json.simple.parser.ParseException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    } catch (URISyntaxException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    }
                 }
                 return response;
             });
         }
     }
 
-    public static void main(String[] args) throws IOException, URISyntaxException, ParseException {
-        if (args.length!=1) {
+    public static void main(String[] args) throws IOException, URISyntaxException, ParseException, KeyManagementException, NoSuchAlgorithmException, KeyStoreException {
+        if (args.length != 1) {
             System.out.println("Usage: java xy.jar <properties.file!>");
             System.exit(1);;
         }

@@ -25,6 +25,7 @@ dependencies {
     implementation(libs.guava)
     //implementation("org.apache.httpcomponents:httpclient:4.5")
     implementation("org.apache.httpcomponents.client5:httpclient5:5.3")
+    implementation("com.googlecode.json-simple:json-simple:1.1.1")
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
